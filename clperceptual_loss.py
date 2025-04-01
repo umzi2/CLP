@@ -161,7 +161,7 @@ def generate_uniform_noise(shape, min_val=0.0, max_val=1.0, device="cpu"):
     return torch.empty(shape).uniform_(min_val, max_val)
 
 
-class CLPerceptualLoss(nn.Module):
+class CLPLoss(nn.Module):
     def __init__(
         self,
         model="dinov2",
