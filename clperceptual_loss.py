@@ -3,74 +3,6 @@ import warnings
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torchvision.models import VGG19_Weights, vgg
-
-
-class VGG(nn.Module):
-    def __init__(self, requires_grad=False, vgg_weights=None):
-        super().__init__()
-        vgg_pretrained_features = vgg.vgg19(weights=VGG19_Weights.DEFAULT).features
-        vgg_pretrained_features.eval()
-
-        if vgg_weights is None:
-            self.vgg_weights = (0.5, 0.5, 1.0, 1.0, 1.0)
-        else:
-            self.vgg_weights = vgg_weights
-
-        self.stage1 = nn.Sequential()
-        self.stage2 = nn.Sequential()
-        self.stage3 = nn.Sequential()
-        self.stage4 = nn.Sequential()
-        self.stage5 = nn.Sequential()
-
-        # vgg19
-        for x in range(4):
-            self.stage1.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(4, 9):
-            self.stage2.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(9, 18):
-            self.stage3.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(18, 27):
-            self.stage4.add_module(str(x), vgg_pretrained_features[x])
-        for x in range(27, 36):
-            self.stage5.add_module(str(x), vgg_pretrained_features[x])
-        if not requires_grad:
-            for param in self.parameters():
-                param.requires_grad = False
-
-        self.register_buffer(
-            "mean", torch.tensor([0.485, 0.456, 0.406]).view(1, -1, 1, 1)
-        )
-        self.register_buffer(
-            "std", torch.tensor([0.229, 0.224, 0.225]).view(1, -1, 1, 1)
-        )
-
-        self.chns = [64, 128, 256, 512, 512]
-
-    def get_features(self, x):
-        # normalize the data
-        h = (x - self.mean) / self.std
-
-        h = self.stage1(h)
-        h_relu1_2 = h * self.vgg_weights[0]
-
-        h = self.stage2(h)
-        h_relu2_2 = h * self.vgg_weights[1]
-
-        h = self.stage3(h)
-        h_relu3_3 = h * self.vgg_weights[2]
-
-        h = self.stage4(h)
-        h_relu4_3 = h * self.vgg_weights[3]
-
-        h = self.stage5(h)
-        h_relu5_3 = h * self.vgg_weights[4]
-
-        # get the features of each layer
-        return [h_relu1_2, h_relu2_2, h_relu3_3, h_relu4_3, h_relu5_3]
-
-    def forward(self, x):
-        return self.get_features(x)
 
 
 class dinov2(nn.Module):
@@ -163,18 +95,11 @@ def generate_uniform_noise(shape, min_val=0.0, max_val=1.0, device="cpu"):
 
 class CLPLoss(nn.Module):
     def __init__(
-        self, model="dinov2", loss_weight: float = 1.0, flatten: int = 2
+        self, loss_weight: float = 1.0, flatten: int = 2
     ) -> None:
         super().__init__()
         self.loss_weight = loss_weight
-        model = model.lower()
-        if model == "vgg":
-            self.model = VGG()
-        elif model == "dinov2":
-            self.model = dinov2()
-        else:
-            msg = "Invalid model type! Valid models: VGG or DINOv2"
-            raise NotImplementedError(msg)
+        self.model = dinov2()
         self.flatten = flatten
         self.criterion = nn.TripletMarginLoss()
 
