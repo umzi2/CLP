@@ -163,9 +163,7 @@ def generate_uniform_noise(shape, min_val=0.0, max_val=1.0, device="cpu"):
 
 class CLPLoss(nn.Module):
     def __init__(
-        self,
-        model="dinov2",
-        loss_weight: float = 1.0,
+        self, model="dinov2", loss_weight: float = 1.0, flatten: int = 2
     ) -> None:
         super().__init__()
         self.loss_weight = loss_weight
@@ -178,6 +176,7 @@ class CLPLoss(nn.Module):
             msg = "Invalid model type! Valid models: VGG or DINOv2"
             raise NotImplementedError(msg)
         self.model = dinov2()
+        self.flatten = flatten
         self.criterion = nn.TripletMarginLoss()
 
     def forward(self, sr, target, lr):
@@ -195,5 +194,9 @@ class CLPLoss(nn.Module):
         len_perceptual = len(sr)
 
         for index in range(len_perceptual):
-            loss += self.criterion(sr[index], target[index], lr[index])
+            loss += self.criterion(
+                sr[index].flatten(start_dim=self.flatten),
+                target[index].flatten(start_dim=self.flatten),
+                lr[index].flatten(start_dim=self.flatten),
+            )
         return loss / len_perceptual * self.loss_weight
