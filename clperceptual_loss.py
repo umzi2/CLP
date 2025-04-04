@@ -175,7 +175,6 @@ class CLPLoss(nn.Module):
         else:
             msg = "Invalid model type! Valid models: VGG or DINOv2"
             raise NotImplementedError(msg)
-        self.model = dinov2()
         self.flatten = flatten
         self.criterion = nn.TripletMarginLoss()
 
