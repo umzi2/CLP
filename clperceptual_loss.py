@@ -89,20 +89,79 @@ class dinov2(nn.Module):
         return self.get_features(x)
 
 
-def generate_uniform_noise(shape, min_val=0.0, max_val=1.0, device="cpu"):
-    return torch.empty(shape).uniform_(min_val, max_val)
+def cosine_triplet_loss(anchor, positive, negative, margin=0.1):
+    anchor = F.normalize(anchor, dim=-1)
+    positive = F.normalize(positive, dim=-1)
+    negative = F.normalize(negative, dim=-1)
+
+    d_pos = 1 - (anchor * positive).sum(dim=-1)
+    d_neg = 1 - (anchor * negative).sum(dim=-1)
+
+    return F.relu(d_pos - d_neg + margin).mean()
 
 
 class CLPLoss(nn.Module):
     def __init__(
-        self, loss_weight: float = 1.0, flatten: int = 2
+        self, loss_weight: float = 1.0, criterion="fd", patch_size=4, num_proj=24
     ) -> None:
         super().__init__()
         self.loss_weight = loss_weight
         self.model = dinov2()
-        self.flatten = flatten
-        self.criterion = nn.TripletMarginLoss()
+        if criterion == "st":
+            self.criterion = cosine_triplet_loss
+        elif criterion == "fd":
+            self.criterion = self.fd
+            for i in range(len(self.model.chns)):
+                rand = torch.randn(
+                    num_proj, self.model.chns[i], patch_size, patch_size, device="cuda"
+                )
+                rand = rand / rand.view(rand.shape[0], -1).norm(dim=1).unsqueeze(
+                    1
+                ).unsqueeze(2).unsqueeze(3)
+                self.register_buffer(f"rand_{i}", rand)
+        else:
+            msg = "Invalid criterion type! Valid models: st or fd"
 
+            raise NotImplementedError(msg)
+
+    def forward_once(self, x, y, z):
+        """
+        x, y: input image tensors with the shape of (N, C, H, W)
+        """
+        rand = getattr(self, f"rand_{self.index}")
+        projx = F.conv2d(x, rand, stride=1)
+        projx = projx.reshape(projx.shape[0], projx.shape[1], -1)
+        projy = F.conv2d(y, rand, stride=1)
+        projy = projy.reshape(projy.shape[0], projy.shape[1], -1)
+        projz = F.conv2d(z, rand, stride=1)
+        projz = projz.reshape(projz.shape[0], projz.shape[1], -1)
+
+        # sort the convolved input
+        projx, _ = torch.sort(projx, dim=-1)
+        projy, _ = torch.sort(projy, dim=-1)
+        projz, _ = torch.sort(projz, dim=-1)
+        # compute the mean of the sorted convolved input
+        return cosine_triplet_loss(projx, projy, projz)
+
+    def fd(self, sr, target, lr):
+        # Transform to Fourier Space
+        fft_sr = torch.fft.fftn(sr, dim=(-2, -1))
+        fft_target = torch.fft.fftn(target, dim=(-2, -1))
+        fft_lr = torch.fft.fftn(lr, dim=(-2, -1))
+        # get the magnitude and phase of the extracted features
+        sr_mag = torch.abs(fft_sr)
+        sr_phase = torch.angle(fft_sr)
+
+        target_mag = torch.abs(fft_target)
+        target_phase = torch.angle(fft_target)
+
+        lr_mag = torch.abs(fft_lr)
+        lr_phase = torch.angle(fft_lr)
+        s_amplitude = self.forward_once(sr_mag, target_mag, lr_mag)
+        s_phase = self.forward_once(sr_phase, target_phase, lr_phase)
+        return s_phase + s_amplitude
+
+    @torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
     def forward(self, sr, target, lr):
         loss = 0
         b, c, h, w = sr.shape
@@ -110,8 +169,6 @@ class CLPLoss(nn.Module):
             lr = F.interpolate(
                 lr, size=(h, w), align_corners=True, mode="bicubic"
             ).clamp(0, 1)
-        mask = lr == target
-        lr[mask] = 1 - target[mask]
         sr = self.model(sr)
         target = self.model(target)
         lr = self.model(lr)
@@ -119,8 +176,8 @@ class CLPLoss(nn.Module):
 
         for index in range(len_perceptual):
             loss += self.criterion(
-                sr[index].flatten(start_dim=self.flatten),
-                target[index].flatten(start_dim=self.flatten),
-                lr[index].flatten(start_dim=self.flatten),
+                sr[index],
+                target[index],
+                lr[index],
             )
         return loss / len_perceptual * self.loss_weight
