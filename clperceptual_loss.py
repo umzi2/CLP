@@ -169,6 +169,8 @@ class CLPLoss(nn.Module):
             lr = F.interpolate(
                 lr, size=(h, w), align_corners=True, mode="bicubic"
             ).clamp(0, 1)
+        mask = lr==target
+        lr[mask] = 1-target[mask]
         sr = self.model(sr)
         target = self.model(target)
         lr = self.model(lr)
