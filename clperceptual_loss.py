@@ -107,6 +107,7 @@ class CLPLoss(nn.Module):
         super().__init__()
         self.loss_weight = loss_weight
         self.model = dinov2()
+        self.index = 0
         if criterion == "st":
             self.criterion = cosine_triplet_loss
         elif criterion == "fd":
@@ -177,6 +178,7 @@ class CLPLoss(nn.Module):
         len_perceptual = len(sr)
 
         for index in range(len_perceptual):
+            self.index = index
             loss += self.criterion(
                 sr[index],
                 target[index],
